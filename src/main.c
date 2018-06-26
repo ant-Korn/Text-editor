@@ -69,6 +69,8 @@ struct editorConfig E;
 /*** prototypes ***/
 
 void editorSetStatusMessage(const char *fmt, ...);
+void editorRefreshScreen();
+char *editorPrompt(char *prompt);
 
 /*** terminal ***/
 
@@ -110,9 +112,10 @@ int editorReadKey(){
     if (c == '\x1b') {
         char seq[3];
 
-        if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
-        if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
-
+        if (read(STDIN_FILENO, &seq[0], 1) != 1)
+            return '\x1b';
+        if (read(STDIN_FILENO, &seq[1], 1) != 1) 
+            return '\x1b';
         if (seq[0] == '[') {
             if (seq[1] >= '0' && seq[1] <= '9') {
                 if (read(STDIN_FILENO, &seq[2], 1) != 1) return '\x1b';
@@ -135,6 +138,7 @@ int editorReadKey(){
                     case 'D': return ARROW_LEFT;
                     case 'H': return HOME_KEY;
                     case 'F': return END_KEY;
+                    case 'P': return DEL_KEY;
                 }
             }
         } else if (seq[0] == 'O') {
@@ -245,7 +249,7 @@ void editorFreeRow(erow *row) {
 void editorDelRow(int at) {
     if (at < 0 || at >= E.numrows) return;
     editorFreeRow(&E.row[at]);
-    memmove(&E.row, E.row[at + 1], sizeof(erow) * (E.numrows - at - 1));
+    memmove(&E.row, &E.row[at + 1], sizeof(erow) * (E.numrows - at - 1));
     E.numrows--;
     E.dirty = 1;
 }
@@ -321,7 +325,7 @@ void editorDelChar() {
 /*** file i/o ***/
 
 char *editorRowsToString(int *buflen) {
-    int titlen = 0;
+    int totlen = 0;
     int j;
     for (j = 0; j < E.numrows; j++)
         totlen += E.row[j].size + 1;
@@ -359,7 +363,13 @@ void editorOpen(char *filename) {
 }
 
 void editorSave() {
-    if (E.filename == NULL) return;
+    if (E.filename == NULL) {
+        E.filename = editorPrompt("Save as: %s (ESC to cancel)");
+        if (E.filename == NULL) {
+            editorSetStatusMessage("Save aborted");
+            return;
+        }
+    }
 
     int len;
     char *buf = editorRowsToString(&len);
@@ -522,6 +532,41 @@ void editorSetStatusMessage(const char *fmt, ...) {
 }
 
 /*** input ***/
+
+char *editorPrompt(char *prompt) {
+    size_t bufsize = 128;
+    char *buf = malloc(bufsize);
+
+    size_t buflen = 0;
+    buf[0] = '\0';
+
+    while (1) {
+        editorSetStatusMessage(prompt, buf);
+        editorRefreshScreen();
+
+        int c = editorReadKey();
+        if (c == DEL_KEY || c == CTRL_KEY('h') || c == BACKSPACE) {
+            if (buflen != 0) buf[--buflen] = '\0';
+        } else if (c == '\x1b') {
+            editorSetStatusMessage("");
+            free(buf);
+            return NULL;
+        }else if (c == '\r') {
+            if (buflen != 0) {
+                editorSetStatusMessage("");
+                return buf;
+            }
+        } else if (!iscntrl(c) && c < 128) {
+            if (buflen == bufsize - 1) {
+                bufsize *= 2;
+                buf = realloc(buf, bufsize);
+            }
+            buf[buflen++] = c;
+            buf[buflen] = '\0';
+        }
+    }
+}
+
 
 void editorMoveCursor(int key) {
     erow *row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];

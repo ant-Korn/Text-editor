@@ -434,20 +434,28 @@ void editorSave() {
 
     int len;
     char *buf = editorRowsToString(&len);
+    char *tmpfilename = malloc(2 + strlen(E.filename));
+    strcpy(tmpfilename + 1, E.filename);
+    tmpfilename[0] = '~';
 
-    int fd = open(E.filename, O_RDWR | O_CREAT, 0644);
+    int fd = open(tmpfilename, O_RDWR | O_CREAT, 0644);
     if (fd != -1) {
         if (ftruncate(fd, len) != -1) {
             if (write(fd, buf, len) == len) {
                 close(fd);
-                free(buf);
-                E.dirty = 0;
-                editorSetStatusMessage("%d bytes written to disk", len);
-                return;
+                if (rename(tmpfilename, E.filename) != -1)
+                {
+                    free(tmpfilename);
+                    free(buf);
+                    E.dirty = 0;
+                    editorSetStatusMessage("%d bytes written to disk", len);
+                    return;
+                }
             }
         }
         close(fd);
     }
+    free(tmpfilename);
     free(buf);
     editorSetStatusMessage("Can't save! I/O error: %s", strerror(errno));
 }
